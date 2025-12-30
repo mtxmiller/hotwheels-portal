@@ -145,6 +145,20 @@ python monitor.py > my_events.log
 
 Mattel discontinued the Hot Wheels id app on January 1, 2024, leaving thousands of Race Portals as paperweights. This project aims to restore functionality through reverse engineering, letting Hot Wheels fans continue to enjoy their hardware.
 
+## Support the Project
+
+If this project helped bring your Hot Wheels Portal back to life, consider supporting development:
+
+- ⭐ **Star this repository**
+- 💖 **[Sponsor on GitHub](https://github.com/sponsors/mtxmiller)**
+- 🐛 **Report issues** and suggest features
+
+[![Sponsor](https://img.shields.io/github/sponsors/mtxmiller?style=for-the-badge&logo=github&label=Sponsor)](https://github.com/sponsors/mtxmiller)
+
+### PayPal Donations
+
+[![Donate with PayPal](https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif)](https://www.paypal.com/ncp/payment/WWXW56JQE4GR4)
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
