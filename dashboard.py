@@ -11,13 +11,15 @@ import sys
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.live import Live
 from rich.table import Table
 from rich.panel import Panel
 from rich.layout import Layout
 from rich.text import Text
+from rich.align import Align
 from rich import box
+import math
 
 from hwportal import HotWheelsPortal
 from hwportal.constants import (
@@ -150,8 +152,147 @@ class Dashboard:
         text.append(f" {speed:.1f} mph", style="bold white")
         return text
 
+    def create_speedometer(self, speed: float, max_speed: float = 150) -> Text:
+        """Create a visual speedometer gauge like a car dashboard."""
+        # Clamp speed
+        speed = max(0, min(speed, max_speed))
+
+        # Determine color based on speed zones
+        if speed < 50:
+            speed_color = "green"
+            zone = "🟢"
+        elif speed < 80:
+            speed_color = "yellow"
+            zone = "🟡"
+        elif speed < 100:
+            speed_color = "orange1"
+            zone = "🟠"
+        else:
+            speed_color = "red"
+            zone = "🔴"
+
+        # Calculate needle position (0-150 mph maps to gauge positions)
+        # The gauge goes from left to right
+        needle_pos = int((speed / max_speed) * 28)  # 28 positions across the gauge
+
+        # Build the speedometer ASCII art
+        lines = []
+
+        # Top decorative line with flames at high speed
+        if speed >= 100:
+            lines.append(("      🔥🔥🔥 BLAZING FAST! 🔥🔥🔥", "bold red"))
+        elif speed >= 80:
+            lines.append(("          ⚡ HIGH SPEED! ⚡", "bold orange1"))
+        else:
+            lines.append(("", ""))
+
+        # Gauge top arc
+        lines.append(("        ╭─────────────────────────────╮", "bright_black"))
+
+        # Speed markings row
+        lines.append(("      ╱  0    40    80   120   150  ╲", "bright_black"))
+
+        # Create the needle row
+        gauge_line = list("     ╱ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░ ╲")
+
+        # Fill in color zones
+        zone_colors = []
+        for i in range(28):
+            pos_speed = (i / 28) * max_speed
+            if pos_speed < 50:
+                zone_colors.append("green")
+            elif pos_speed < 80:
+                zone_colors.append("yellow")
+            elif pos_speed < 100:
+                zone_colors.append("orange1")
+            else:
+                zone_colors.append("red")
+
+        # Gauge with colored zones
+        lines.append(("     ╱ ", "bright_black"))
+
+        # The arc bottom
+        lines.append(("     ╰────────────────────────────────╯", "bright_black"))
+
+        # Needle indicator
+        needle_line = "              " + " " * needle_pos + "▲"
+        lines.append((needle_line, speed_color))
+
+        # Big speed display
+        speed_str = f"{speed:.0f}"
+        lines.append(("", ""))
+        lines.append((f"           ┏━━━━━━━━━━━━━┓", speed_color))
+        lines.append((f"           ┃  {speed_str:^7}  ┃", f"bold {speed_color}"))
+        lines.append((f"           ┃     MPH     ┃", speed_color))
+        lines.append((f"           ┗━━━━━━━━━━━━━┛", speed_color))
+
+        # Build the Text object with colors
+        text = Text()
+
+        # Add the gauge visualization
+        text.append("        ╭─────────────────────────────╮\n", style="white")
+        text.append("      ╱", style="white")
+        text.append("  0    40    80   120   150 ", style="dim")
+        text.append(" ╲\n", style="white")
+
+        # Colored gauge bar
+        text.append("     ╱ ", style="white")
+        for i in range(28):
+            pos_speed = (i / 28) * max_speed
+            if pos_speed < 50:
+                c = "green"
+            elif pos_speed < 80:
+                c = "yellow"
+            elif pos_speed < 100:
+                c = "orange1"
+            else:
+                c = "red"
+
+            if i == needle_pos:
+                text.append("▼", style=f"bold white on {c}")
+            else:
+                text.append("━", style=c)
+        text.append(" ╲\n", style="white")
+
+        text.append("     ╰────────────────────────────────╯\n", style="white")
+
+        # Needle pointer below
+        text.append("       " + " " * needle_pos + "┃\n", style=f"bold {speed_color}")
+        text.append("       " + " " * needle_pos + "┃\n", style=f"bold {speed_color}")
+
+        # Speed display box
+        text.append("\n")
+
+        # Add flames/effects for high speed
+        if speed >= 100:
+            text.append("         🔥", style="red")
+            text.append(f"  {speed:.0f}  ", style=f"bold {speed_color} reverse")
+            text.append("🔥\n", style="red")
+            text.append("            MPH\n", style=f"bold {speed_color}")
+            text.append("       🏁 RECORD SPEED! 🏁\n", style="bold white")
+        elif speed >= 80:
+            text.append("         ⚡", style="yellow")
+            text.append(f"  {speed:.0f}  ", style=f"bold {speed_color} reverse")
+            text.append("⚡\n", style="yellow")
+            text.append("            MPH\n", style=f"bold {speed_color}")
+        else:
+            text.append(f"          {speed:.0f}\n", style=f"bold {speed_color}")
+            text.append("            MPH\n", style=f"{speed_color}")
+
+        return text
+
+    def create_speedometer_panel(self, speed: float) -> Panel:
+        """Create the full speedometer panel with title."""
+        speedo = self.create_speedometer(speed)
+        return Panel(
+            Align.center(speedo),
+            title="🏎️ SPEEDOMETER",
+            border_style="bright_blue",
+            padding=(0, 1)
+        )
+
     def build_display(self) -> Layout:
-        """Build the dashboard layout."""
+        """Build the dashboard layout with prominent speedometer."""
         layout = Layout()
 
         layout.split_column(
@@ -160,8 +301,10 @@ class Dashboard:
             Layout(name="footer", size=3),
         )
 
+        # Split main into speedometer (center) and side panels
         layout["main"].split_row(
             Layout(name="left", ratio=1),
+            Layout(name="center", ratio=2),
             Layout(name="right", ratio=1),
         )
 
@@ -170,55 +313,72 @@ class Dashboard:
         header_text.append("🏎️  HOT WHEELS PORTAL DASHBOARD  🏎️", style="bold magenta")
         layout["header"].update(Panel(header_text, style="magenta"))
 
-        # Current car panel (left)
+        # Get current speed for speedometer
+        current_speed = 0.0
+        if self.current_car and self.current_car.speeds:
+            current_speed = self.current_car.speeds[-1]
+        elif self.recent_passes:
+            current_speed = self.recent_passes[-1]["speed"]
+
+        # CENTER: Big speedometer
+        layout["center"].update(self.create_speedometer_panel(current_speed))
+
+        # LEFT: Current car info
         if self.current_car:
             car = self.current_car
             car_info = Table(show_header=False, box=None, padding=(0, 1))
             car_info.add_column("Label", style="dim")
             car_info.add_column("Value", style="bold")
 
-            car_info.add_row("NFC UID:", car.nfc_uid)
-            car_info.add_row("Serial:", car.serial or "—")
-            car_info.add_row("Laps:", str(car.laps))
-
-            if car.speeds:
-                last_speed = car.speeds[-1]
-                car_info.add_row("Last Speed:", "")
-                car_info.add_row("", self.create_speed_bar(last_speed))
-                car_info.add_row("Best Speed:", f"{car.best_speed:.1f} mph")
+            # Shorter UID display
+            short_uid = car.nfc_uid[:11] + "..."
+            car_info.add_row("🚗 Car:", short_uid)
+            car_info.add_row("🔢 Serial:", car.serial or "—")
+            car_info.add_row("", "")
+            car_info.add_row("🏁 Laps:", str(car.laps))
+            car_info.add_row("⚡ Best:", f"{car.best_speed:.0f} mph")
 
             if car.best_lap < float('inf'):
-                car_info.add_row("Best Lap:", f"{car.best_lap:.2f}s")
+                car_info.add_row("⏱️ Best Lap:", f"{car.best_lap:.2f}s")
 
             if car.lap_times:
                 avg_lap = sum(car.lap_times) / len(car.lap_times)
-                car_info.add_row("Avg Lap:", f"{avg_lap:.2f}s")
+                car_info.add_row("📊 Avg Lap:", f"{avg_lap:.2f}s")
 
-            layout["left"].update(Panel(car_info, title="🚗 Current Car", border_style="green"))
+            layout["left"].update(Panel(car_info, title="CAR INFO", border_style="green"))
         else:
-            no_car = Text("Place a car on the portal", style="dim italic", justify="center")
-            layout["left"].update(Panel(no_car, title="🚗 Current Car", border_style="dim"))
+            no_car_text = Text()
+            no_car_text.append("\n\n", style="")
+            no_car_text.append("  🚗\n", style="dim")
+            no_car_text.append("\n  Place car\n", style="dim italic")
+            no_car_text.append("  on portal\n", style="dim italic")
+            layout["left"].update(Panel(no_car_text, title="CAR INFO", border_style="dim"))
 
-        # Recent passes (right)
-        passes_table = Table(box=box.SIMPLE, padding=(0, 1))
-        passes_table.add_column("#", style="dim", width=4)
-        passes_table.add_column("Time", width=10)
-        passes_table.add_column("Car", width=10)
-        passes_table.add_column("Speed", width=12)
-        passes_table.add_column("Lap", width=8)
+        # RIGHT: Recent passes (compact)
+        passes_table = Table(box=None, padding=(0, 0), show_header=True)
+        passes_table.add_column("#", style="dim", width=3)
+        passes_table.add_column("Speed", width=8)
+        passes_table.add_column("Lap", width=6)
 
-        for i, p in enumerate(reversed(self.recent_passes[-8:]), 1):
-            speed_style = "green" if p["speed"] < 80 else "cyan" if p["speed"] < 100 else "red"
-            lap_str = f"{p['lap_time']:.2f}s" if p['lap_time'] else "—"
+        for i, p in enumerate(reversed(self.recent_passes[-6:]), 1):
+            if p["speed"] >= 100:
+                speed_style = "bold red"
+                icon = "🔥"
+            elif p["speed"] >= 80:
+                speed_style = "bold orange1"
+                icon = "⚡"
+            else:
+                speed_style = "green"
+                icon = "  "
+
+            lap_str = f"{p['lap_time']:.1f}s" if p['lap_time'] else "—"
             passes_table.add_row(
-                str(self.total_passes - i + 1),
-                p["time"].strftime("%H:%M:%S"),
-                p["car"],
-                Text(f"{p['speed']:.1f} mph", style=speed_style),
+                f"{icon}",
+                Text(f"{p['speed']:.0f}", style=speed_style),
                 lap_str,
             )
 
-        layout["right"].update(Panel(passes_table, title="📊 Recent Passes", border_style="blue"))
+        layout["right"].update(Panel(passes_table, title="HISTORY", border_style="blue"))
 
         # Footer - status and session info
         session_duration = datetime.now() - self.session_start
@@ -228,9 +388,9 @@ class Dashboard:
         footer_text = Text()
         footer_text.append(f"Status: {self.status_message}", style="bold")
         footer_text.append(f"  │  Session: {minutes}m {seconds}s", style="dim")
-        footer_text.append(f"  │  Total Passes: {self.total_passes}", style="dim")
-        footer_text.append(f"  │  Cars Seen: {len(self.car_database)}", style="dim")
-        footer_text.append("  │  Press Ctrl+C to exit", style="dim italic")
+        footer_text.append(f"  │  Passes: {self.total_passes}", style="dim")
+        footer_text.append(f"  │  Cars: {len(self.car_database)}", style="dim")
+        footer_text.append("  │  Ctrl+C to exit", style="dim italic")
 
         layout["footer"].update(Panel(footer_text, style="dim"))
 
