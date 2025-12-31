@@ -28,6 +28,7 @@ from hwportal.constants import CHAR_EVENT_2, CHAR_EVENT_3, CHAR_SERIAL_NUMBER
 
 class GameState(Enum):
     MENU = auto()
+    NAME_ENTRY = auto()
     SETUP = auto()
     COUNTDOWN = auto()
     RACING = auto()
@@ -70,8 +71,8 @@ class RaceGame:
         self.last_speed: float = 0.0
 
         # Player tracking
-        self.current_player = "Player 1"
-        self.player_count = 1
+        self.current_player = ""
+        self.name_buffer = ""  # For typing player name
         self.results: list[RaceResult] = []
 
         # Countdown
@@ -161,6 +162,46 @@ class RaceGame:
         text.append("  Race against the clock!\n", style="dim")
         text.append("  Complete laps and set records.\n\n", style="dim")
         text.append("  ─────────────────────────\n\n", style="dim")
+        text.append("  [S] Start New Race\n\n", style="bold green")
+        text.append("  [L] View Leaderboard\n", style="blue")
+        text.append("  [Q] Quit\n\n", style="dim")
+
+        return Panel(
+            Align.center(text),
+            title="🏎️ HOT WHEELS RACE",
+            border_style="magenta",
+        )
+
+    def create_name_entry_display(self) -> Panel:
+        """Create the name entry display."""
+        text = Text()
+        text.append("\n")
+        text.append("  👤 ENTER YOUR NAME 👤\n\n", style="bold cyan")
+        text.append("  Type your name and press ENTER\n\n", style="dim")
+        text.append("  ─────────────────────────\n\n", style="dim")
+
+        # Show current input with cursor
+        text.append("  Name: ", style="white")
+        text.append(self.name_buffer, style="bold yellow")
+        text.append("▌\n\n", style="bold yellow")  # Cursor
+
+        text.append("  ─────────────────────────\n\n", style="dim")
+        text.append("  Press ENTER when done\n", style="green")
+        text.append("  Press ESC to go back\n", style="dim")
+
+        return Panel(
+            Align.center(text),
+            title="🏎️ NEW RACER",
+            border_style="cyan",
+        )
+
+    def create_lap_select_display(self) -> Panel:
+        """Create the lap selection display."""
+        text = Text()
+        text.append("\n")
+        text.append(f"  🏎️ RACER: {self.current_player} 🏎️\n\n", style="bold cyan")
+        text.append("  Select number of laps:\n\n", style="dim")
+        text.append("  ─────────────────────────\n\n", style="dim")
         text.append("  [1]  5 Laps", style="bold cyan")
         text.append("   (Quick Race)\n", style="dim")
         text.append("  [2] 10 Laps", style="bold green")
@@ -169,15 +210,13 @@ class RaceGame:
         text.append("   (Endurance)\n", style="dim")
         text.append("  [4] 20 Laps", style="bold orange1")
         text.append("   (Marathon)\n", style="dim")
-        text.append("  [C] Custom\n\n", style="bold white")
-        text.append("  ─────────────────────────\n\n", style="dim")
-        text.append("  [L] View Leaderboard\n", style="blue")
-        text.append("  [Q] Quit\n\n", style="dim")
+        text.append("\n  ─────────────────────────\n\n", style="dim")
+        text.append("  [M] Main Menu\n", style="dim")
 
         return Panel(
             Align.center(text),
-            title="🏎️ HOT WHEELS RACE",
-            border_style="magenta",
+            title="🏁 SELECT LAPS",
+            border_style="green",
         )
 
     def create_countdown_display(self) -> Panel:
@@ -438,6 +477,10 @@ class RaceGame:
         """Build the current display based on game state."""
         if self.state == GameState.MENU:
             return self.create_menu_display()
+        elif self.state == GameState.NAME_ENTRY:
+            return self.create_name_entry_display()
+        elif self.state == GameState.SETUP:
+            return self.create_lap_select_display()
         elif self.state == GameState.COUNTDOWN:
             return self.create_countdown_display()
         elif self.state == GameState.RACING:
@@ -515,12 +558,40 @@ class RaceGame:
             # Check if input is available
             dr, _, _ = select.select([sys.stdin], [], [], 0)
             if dr:
-                key = sys.stdin.read(1).lower()
+                key = sys.stdin.read(1)
+                # Only lowercase for menu navigation, not name entry
+                if self.state != GameState.NAME_ENTRY:
+                    key = key.lower()
                 await self.process_key(key)
 
     async def process_key(self, key: str):
         """Process a key press."""
         if self.state == GameState.MENU:
+            if key == 's':
+                # Start new race - go to name entry
+                self.name_buffer = ""
+                self.state = GameState.NAME_ENTRY
+            elif key == 'l':
+                self.state = GameState.LEADERBOARD
+            elif key == 'q':
+                raise KeyboardInterrupt()
+
+        elif self.state == GameState.NAME_ENTRY:
+            if key == '\r' or key == '\n':  # Enter
+                # Confirm name
+                if self.name_buffer.strip():
+                    self.current_player = self.name_buffer.strip()
+                else:
+                    self.current_player = "Anonymous"
+                self.state = GameState.SETUP
+            elif key == '\x1b':  # Escape
+                self.state = GameState.MENU
+            elif key == '\x7f' or key == '\b':  # Backspace
+                self.name_buffer = self.name_buffer[:-1]
+            elif key.isprintable() and len(self.name_buffer) < 15:
+                self.name_buffer += key
+
+        elif self.state == GameState.SETUP:
             if key == '1':
                 self.target_laps = 5
                 await self.run_countdown()
@@ -533,21 +604,14 @@ class RaceGame:
             elif key == '4':
                 self.target_laps = 20
                 await self.run_countdown()
-            elif key == 'c':
-                # Custom - for now default to 10
-                self.target_laps = 10
-                await self.run_countdown()
-            elif key == 'l':
-                self.state = GameState.LEADERBOARD
-            elif key == 'q':
-                raise KeyboardInterrupt()
+            elif key == 'm':
+                self.state = GameState.MENU
 
         elif self.state == GameState.FINISHED:
             if key == 'n':
-                # Next player
-                self.player_count += 1
-                self.current_player = f"Player {self.player_count}"
-                self.state = GameState.MENU
+                # Next player - go to name entry
+                self.name_buffer = ""
+                self.state = GameState.NAME_ENTRY
             elif key == 'r':
                 # Race again same player
                 await self.run_countdown()
