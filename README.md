@@ -64,9 +64,20 @@ python dashboard.py
 | Command | Description |
 |---------|-------------|
 | `python dashboard.py` | Live dashboard with speed & lap tracking |
+| `python race_mode.py` | 🏁 **Lap Race Game** - compete for best times! |
 | `python portal_app.py` | Detailed event monitor with car data |
 | `python scanner.py` | Scan for BLE devices |
 | `python monitor.py` | Raw event monitor for debugging |
+
+### 🏁 Lap Race Mode
+
+A competitive game mode where players race to complete laps:
+
+- Select lap count (5, 10, 15, or 20 laps)
+- 3-2-1 countdown to start
+- Real-time lap tracking with best/worst comparison
+- Results screen with full breakdown
+- **Leaderboard** to compete with friends!
 
 ## Using as a Library
 
@@ -121,9 +132,9 @@ hotwheels-portal/
 - [x] BLE connection and event monitoring
 - [x] Car detection (NFC UID, serial)
 - [x] Speed tracking
-- [x] Live dashboard
+- [x] Live dashboard with speedometer
+- [x] Lap race game mode with leaderboard
 - [ ] Persistent car database
-- [ ] Race mode with countdown
 - [ ] Car collection/garage view
 - [ ] Achievement system
 - [ ] Car name lookup from Mattel ID
