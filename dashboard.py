@@ -6,7 +6,6 @@ A beautiful terminal UI for viewing real-time lap times and speed data.
 """
 
 import asyncio
-import struct
 import sys
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
@@ -26,6 +25,7 @@ from hwportal.constants import (
     CHAR_EVENT_1, CHAR_EVENT_2, CHAR_EVENT_3,
     CHAR_CONTROL, CHAR_SERIAL_NUMBER
 )
+from hwportal.mpid import format_uid, decode_speed_mph
 
 
 @dataclass
@@ -74,7 +74,7 @@ class Dashboard:
         if event.characteristic == CHAR_EVENT_2:
             # Car detection
             if len(data) >= 7:
-                nfc_uid = ":".join(f"{b:02X}" for b in data[1:7])
+                nfc_uid = format_uid(data)
                 self.current_car = self.get_car(nfc_uid)
                 self.current_car.last_seen = datetime.now()
                 self.status_message = f"Car detected: {nfc_uid[:11]}..."
@@ -89,10 +89,8 @@ class Dashboard:
 
         elif event.characteristic == CHAR_EVENT_3:
             # Speed data
-            if len(data) >= 4:
-                speed = struct.unpack('<f', data[:4])[0]
-                scale_speed = speed * 64  # Scale to "real world" equivalent
-
+            scale_speed = decode_speed_mph(data)
+            if scale_speed is not None:
                 now = datetime.now()
 
                 # Calculate lap time if we have a previous pass
