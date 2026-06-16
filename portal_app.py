@@ -6,16 +6,15 @@ A simple CLI application to connect to and monitor the Hot Wheels id Race Portal
 """
 
 import asyncio
-import base64
-import struct
 import sys
 from datetime import datetime
 
-from hwportal import HotWheelsPortal
-from hwportal.constants import (
+from common_lib import HotWheelsPortal
+from common_lib.constants import (
     CHAR_EVENT_1, CHAR_EVENT_2, CHAR_EVENT_3,
     CHAR_CONTROL, CHAR_SERIAL_NUMBER
 )
+from common_lib.mpid import decode_car_event, decode_ndef_record, decode_speed_event
 
 
 def print_header():
@@ -37,104 +36,8 @@ current_car = {
 }
 
 
-def decode_car_event(data: bytes) -> dict:
-    """Decode Event Channel 2 - Car detection (NFC UID)."""
-    if len(data) < 7:
-        return {"raw": data.hex()}
-
-    event_type = data[0]
-    nfc_uid = data[1:7].hex().upper()
-
-    # Format NFC UID nicely
-    nfc_formatted = ":".join(nfc_uid[i:i+2] for i in range(0, len(nfc_uid), 2))
-
-    return {
-        "event_type": event_type,
-        "nfc_uid": nfc_formatted,
-        "type_name": "Car Detected" if event_type == 0x04 else f"Unknown (0x{event_type:02x})"
-    }
-
-
-def decode_ndef_record(data: bytes) -> dict:
-    """Decode Event Channel 1 - Full NFC NDEF record with car identity."""
-    if len(data) < 10:
-        return {"raw": data.hex()} if data else {"empty": True}
-
-    result = {}
-
-    # NDEF record structure:
-    # Byte 0: Header (TNF + flags)
-    # Byte 1: Type length
-    # Byte 2: Payload length (if SR flag set)
-    # Byte 3: Type
-    # Byte 4+: Payload
-
-    header = data[0]
-    type_len = data[1]
-    payload_len = data[2]
-    record_type = data[3:3+type_len]
-
-    # Check if it's a URI record (type = 'U' = 0x55)
-    if record_type == b'U':
-        # URI prefix code
-        uri_prefix_code = data[4]
-        uri_prefixes = {
-            0x00: "",
-            0x01: "http://www.",
-            0x02: "https://www.",
-            0x03: "http://",
-            0x04: "https://",
-        }
-        prefix = uri_prefixes.get(uri_prefix_code, "")
-
-        # URI content (rest of payload minus the prefix byte)
-        uri_content = data[5:4+payload_len].decode('utf-8', errors='replace')
-        full_uri = prefix + uri_content
-
-        result["uri"] = full_uri
-
-        # Parse Mattel car ID from URI
-        if "pid.mattel/" in full_uri:
-            # Extract the base64 part after pid.mattel/
-            parts = full_uri.split("pid.mattel/")
-            if len(parts) > 1:
-                mattel_id = parts[1]
-                result["mattel_id"] = mattel_id
-
-                # Try to decode the base64 to see what's inside
-                try:
-                    # The ID might be URL-safe base64
-                    decoded = base64.urlsafe_b64decode(mattel_id + "==")
-                    result["mattel_id_decoded"] = decoded.hex()
-                except:
-                    pass
-
-    # There's additional data after the URI record (signature/crypto data)
-    ndef_end = 4 + payload_len
-    if len(data) > ndef_end:
-        extra_data = data[ndef_end:]
-        result["signature"] = extra_data.hex()
-        result["signature_len"] = len(extra_data)
-
-    return result
-
-
-def decode_speed_event(data: bytes) -> dict:
-    """Decode Event Channel 3 - Speed/timing data (IEEE 754 float)."""
-    if len(data) < 4:
-        return {"raw": data.hex()}
-
-    # Decode as little-endian float32
-    speed_float = struct.unpack('<f', data[:4])[0]
-
-    # Hot Wheels id uses 1:64 scale, so real speed would be scaled
-    # The float might be in m/s or some internal unit
-    scale_speed_mph = speed_float * 64  # Scale up for "real" speed
-
-    return {
-        "raw_float": speed_float,
-        "scaled_mph": scale_speed_mph,
-    }
+# decode_car_event / decode_ndef_record / decode_speed_event now live in
+# common_lib.mpid (single source of truth, shared by all transports + apps).
 
 
 def decode_control_register(data: bytes) -> dict:
@@ -218,6 +121,29 @@ def event_handler(event):
         print(f"\n  >>> EVENT [{event.char_name}]: {data.hex()}")
 
 
+def make_device_info_handler(portal):
+    """Structured-message callback (MPID). Firmware/hardware/battery come from
+    the DeviceInfo heartbeat; the serial is sourced from the FACTORY token
+    (this firmware omits serial_number from the heartbeat) via portal.info."""
+    shown = {"done": False}
+
+    def handler(msg):
+        if msg.info is None:
+            return
+        info = msg.info
+        if not shown["done"]:
+            shown["done"] = True
+            serial = (portal.info.serial_number if portal.info else "") or "(unavailable)"
+            print("\n  >>> PORTAL INFO")
+            print(f"      Firmware: {info.semantic_firmware_version or info.firmware_version}")
+            print(f"      Serial:   {serial}")
+            print(f"      Hardware: {info.hardware_version}")
+        print(f"      Battery:  {info.battery_level:.0%} "
+              f"({info.battery_status.name}, {info.mode.name})")
+
+    return handler
+
+
 async def main():
     """Main application entry point."""
     print_header()
@@ -228,7 +154,7 @@ async def main():
     # Scan for portals
     if address is None:
         print("Scanning for Hot Wheels Portal...")
-        portals = await HotWheelsPortal.scan(timeout=10.0)
+        portals = await HotWheelsPortal.scan(timeout=20.0)
 
         if not portals:
             print("\nNo portal found!")
@@ -263,20 +189,30 @@ async def main():
             print("PORTAL CONNECTED")
             print("-" * 60)
             print(f"  Address: {info.address}")
-            print(f"  Firmware: {info.firmware_version}")
-            print(f"  Serial: {info.serial_number}")
+            print(f"  Transport: {portal.transport}")
 
-            if info.device_key:
-                # Parse the device key - it starts with device info
-                key_str = info.device_key[:50].decode("utf-8", errors="replace")
-                print(f"  Device ID: {key_str[:30]}...")
+            if portal.transport == "mpid":
+                # Firmware/serial are not readable characteristics on MPID; they
+                # arrive in the DeviceInfo heartbeat once monitoring starts.
+                print("  Firmware: (from heartbeat after connect)")
+                print("  Serial:   (from heartbeat after connect)")
+            else:
+                print(f"  Firmware: {info.firmware_version}")
+                print(f"  Serial: {info.serial_number}")
+                if info.device_key:
+                    key_str = info.device_key[:50].decode("utf-8", errors="replace")
+                    print(f"  Device ID: {key_str[:30]}...")
 
-            # Read control register
-            ctrl = await portal.read_control_register()
-            print(f"  Control: {ctrl.hex()}")
+            # Read control register (legacy 000c transport only; absent on MPID)
+            try:
+                ctrl = await portal.read_control_register()
+                print(f"  Control: {ctrl.hex()}")
+            except Exception:
+                pass
 
-            # Register event handler
+            # Register event handlers
             portal.on_event(event_handler)
+            portal.on_message(make_device_info_handler(portal))
 
             # Start monitoring
             await portal.start_monitoring()

@@ -7,12 +7,10 @@ and compare their times.
 """
 
 import asyncio
-import struct
 import sys
 from datetime import datetime
 from dataclasses import dataclass, field
 from enum import Enum, auto
-
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
@@ -22,8 +20,9 @@ from rich.text import Text
 from rich.align import Align
 from rich import box
 
-from hwportal import HotWheelsPortal
-from hwportal.constants import CHAR_EVENT_2, CHAR_EVENT_3, CHAR_SERIAL_NUMBER
+from common_lib import HotWheelsPortal
+from common_lib.constants import CHAR_EVENT_2, CHAR_EVENT_3, CHAR_SERIAL_NUMBER
+from common_lib.mpid import format_uid, decode_speed_mph
 
 
 class GameState(Enum):
@@ -88,7 +87,7 @@ class RaceGame:
         if event.characteristic == CHAR_EVENT_2:
             # Car detection
             if len(data) >= 7:
-                self.current_car_uid = ":".join(f"{b:02X}" for b in data[1:7])
+                self.current_car_uid = format_uid(data)
             elif len(data) == 0:
                 self.current_car_uid = None
 
@@ -98,9 +97,9 @@ class RaceGame:
 
         elif event.characteristic == CHAR_EVENT_3:
             # Speed/lap event
-            if len(data) >= 4 and self.state == GameState.RACING:
-                speed = struct.unpack('<f', data[:4])[0]
-                self.last_speed = speed * 64
+            mph = decode_speed_mph(data)
+            if mph is not None and self.state == GameState.RACING:
+                self.last_speed = mph
 
                 now = datetime.now()
 
@@ -549,20 +548,30 @@ class RaceGame:
     async def handle_input(self):
         """Handle keyboard input based on current state."""
         import sys
-        import select
-        import tty
-        import termios
+        if sys.platform == "win32":
+            import msvcrt
 
-        # Non-blocking input check (Unix only)
-        if sys.platform != 'win32':
-            # Check if input is available
-            dr, _, _ = select.select([sys.stdin], [], [], 0)
-            if dr:
-                key = sys.stdin.read(1)
+            if msvcrt.kbhit():
+                key = msvcrt.getwch()
+                # Skip special key prefixes (arrows, function keys)
+                if key in ("\x00", "\xe0"):
+                    _ = msvcrt.getwch()
+                    return
                 # Only lowercase for menu navigation, not name entry
                 if self.state != GameState.NAME_ENTRY:
                     key = key.lower()
                 await self.process_key(key)
+            return
+
+        import select
+        # Non-blocking input check (Unix only)
+        dr, _, _ = select.select([sys.stdin], [], [], 0)
+        if dr:
+            key = sys.stdin.read(1)
+            # Only lowercase for menu navigation, not name entry
+            if self.state != GameState.NAME_ENTRY:
+                key = key.lower()
+            await self.process_key(key)
 
     async def process_key(self, key: str):
         """Process a key press."""
@@ -635,18 +644,19 @@ async def main():
 
 def run_game():
     """Entry point that sets up terminal correctly."""
+    if sys.platform == "win32":
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            print("\n\nRace ended!")
+        return
     import tty
     import termios
     import atexit
-
-    # Save terminal settings
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
-
     def restore_terminal():
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-
-    # Restore on exit
     atexit.register(restore_terminal)
 
     try:
