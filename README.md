@@ -10,6 +10,7 @@ An open-source tool to connect to the Hot Wheels id Race Portal after Mattel dis
 
 ## What It Does
 
+- **Common Python Library** - For others to be able to use with any python project.
 - **Detect cars** - Reads NFC UID and serial number when you place a car on the portal
 - **Track speed** - Measures speed as cars pass through (in "scale mph")
 - **Count laps** - Tracks lap times and calculates best/average times
@@ -57,17 +58,20 @@ python dashboard.py
 - **Python 3.10+**
 - **macOS, Windows, or Linux** with Bluetooth Low Energy support
 - **Hot Wheels id Race Portal** (Model FXB53)
+If you want to read car data and not just speed:
 - **Hot Wheels id cars** (with NFC chips)
 
 ## Available Tools
+Before you run any tool you need to have the portal in connect mode (blue fading in and out light) if its not hit the button on it and it generally will go into it.
+
 
 | Command | Description |
 |---------|-------------|
 | `python dashboard.py` | Live dashboard with speed & lap tracking |
 | `python race_mode.py` | 🏁 **Lap Race Game** - compete for best times! |
 | `python portal_app.py` | Detailed event monitor with car data |
+| `python mpid_monitor.py` | Authenticate (MPID) and dump decoded live events; `--raw` adds encrypted frames |
 | `python scanner.py` | Scan for BLE devices |
-| `python monitor.py` | Raw event monitor for debugging |
 
 ### 🏁 Lap Race Mode
 
@@ -102,14 +106,26 @@ asyncio.run(main())
 
 ## Protocol Documentation
 
-We've fully reverse-engineered the BLE protocol! See [PROTOCOL.md](PROTOCOL.md) for details.
+> ⚠️ **Heads up:** an earlier `PROTOCOL.md` in this repo described a plaintext
+> "Portal Control" service (`…-000c`) with neatly framed event packets. **That
+> document was an AI hallucination** — neither the service it describes nor its
+> payload formats exist on any real portal, and none of it was ever validated
+> against hardware. It has been removed to avoid confusion. Ignore any copies you
+> may have.
+
+The **real**, hardware-validated protocol is documented in
+**[PROTOCOL_NEW.md](PROTOCOL_NEW.md)**: the encrypted/authenticated **MPID**
+transport (P-256 ECDH key exchange + AES-128-CTR) and the Protocol Buffers
+application layer. It was recovered by decompiling the official Mattel app's
+native library with Ghidra and confirmed live against a real portal.
 
 **Key discoveries:**
 - Device advertises as `HWiD`
-- 3 BLE services for auth, data transfer, and control
+- Encrypted MPID session over the auth service (`af0a6ec7-0001-000a`); no `…-000c` service on current firmware
 - Car detection via NFC UID (6 bytes)
-- Speed data as IEEE 754 float32
+- Speed data as IEEE 754 float32 (×64 for "scale mph")
 - Full NDEF records with Mattel car IDs
+- Application layer is Protocol Buffers
 
 ## Project Structure
 
@@ -123,7 +139,7 @@ hotwheels-portal/
 ├── portal_app.py       # Event monitor app
 ├── scanner.py          # BLE scanner
 ├── monitor.py          # Raw event monitor
-├── PROTOCOL.md         # Protocol documentation
+├── PROTOCOL_NEW.md     # Actual hardware-validated protocol (MPID)
 └── requirements.txt
 ```
 
